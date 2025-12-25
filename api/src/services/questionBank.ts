@@ -33,7 +33,6 @@ export async function loadQuestionBank(): Promise<Question[]> {
 
     // ✅ 分隔列：整列都空白 → 切斷沿用，避免後面殘留例句被綁到前一題
     const hasABCOrE = Boolean(aKanaRaw || bZhRaw || eWordRaw);
-const hasSentence = Boolean(cClozeRaw || dClozeZhRaw);
 
 if (!hasABCOrE && !hasSentence) {
   curKana = '';
