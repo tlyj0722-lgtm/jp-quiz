@@ -41,3 +41,8 @@ export function tokenizeWithParticles(input: string): ParticleToken[] {
 export function tokenize(input: string): string[] {
   return tokenizeWithParticles(input).map((x) => x.t);
 }
+
+// Alias for quiz.ts (cloze sentence tokenizer)
+export function tokenizeClozeToTokens(input: string): ParticleToken[] {
+  return tokenizeWithParticles(input);
+}
