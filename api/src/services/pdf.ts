@@ -9,21 +9,24 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 你可以把字型放在：api/assets/fonts/NotoSansCJKtc-Regular.otf
-// 這裡用「預設路徑」+「可用 env 覆蓋」
+// ✅ 依你 repo 的實際位置：api/src/fonts/NotoSansTC-Regular.ttf
 function resolveFontPath() {
-  // 1) env 覆蓋（如果你想用 Render 的 Secret File 或自訂路徑）
+  // 1) env 覆蓋（例如 Render secret file：/etc/secrets/xxx.ttf）
   const envPath = process.env.PDF_FONT_PATH;
   if (envPath && fs.existsSync(envPath)) return envPath;
 
-  // 2) 預設：專案內字型（建議 commit 到 repo）
-  //    依你檔案位置調整：此檔在 api/src/services/xxx.ts 的話，往上兩層到 api/
-  const bundled = path.resolve(__dirname, "../../assets/fonts/NotoSansCJKtc-Regular.otf");
-  if (fs.existsSync(bundled)) return bundled;
+  // 2) 最穩：用 process.cwd() 從 repo root 找（Render checkout 後通常會在 root）
+  const cwdPath = path.resolve(process.cwd(), "api", "src", "fonts", "NotoSansTC-Regular.ttf");
+  if (fs.existsSync(cwdPath)) return cwdPath;
 
-  // 3) 也容錯一下：某些 build/部署路徑會不同
-  const bundledAlt = path.resolve(process.cwd(), "api/assets/fonts/NotoSansCJKtc-Regular.otf");
-  if (fs.existsSync(bundledAlt)) return bundledAlt;
+  // 3) 若目前檔案是跑在 api/src/services/pdf.ts（dev / ts-node）
+  const fromSrc = path.resolve(__dirname, "..", "fonts", "NotoSansTC-Regular.ttf"); // api/src/fonts/...
+  if (fs.existsSync(fromSrc)) return fromSrc;
+
+  // 4) 若目前檔案是跑在 api/dist/services/pdf.js（tsc 後）
+  //    往上兩層回到 api/dist，再去 api/src/fonts（repo 仍會存在）
+  const fromDistToSrc = path.resolve(__dirname, "..", "..", "src", "fonts", "NotoSansTC-Regular.ttf");
+  if (fs.existsSync(fromDistToSrc)) return fromDistToSrc;
 
   return null;
 }
@@ -36,14 +39,15 @@ export function sendWrongPdf(
 
   // ✅ CJK 字型（避免 PDF 亂碼）
   const fontPath = resolveFontPath();
-  if (fontPath) {
-    try {
-      doc.registerFont("cjk", fontPath);
-      doc.font("cjk");
-    } catch {
-      // 若字型載入失敗，仍繼續產生（但可能會亂碼）
-    }
+  if (!fontPath) {
+    // 直接讓它明確爆錯，否則你只會拿到「看似成功但亂碼」的 PDF
+    throw new Error(
+      "PDF font not found. Put NotoSansTC-Regular.ttf at api/src/fonts/ or set PDF_FONT_PATH."
+    );
   }
+
+  doc.registerFont("cjk", fontPath);
+  doc.font("cjk");
 
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
@@ -58,9 +62,7 @@ export function sendWrongPdf(
   doc
     .fontSize(10)
     .text(
-      `姓名: ${opts.name}    學號: ${opts.studentId}    匯出時間: ${new Date().toLocaleString(
-        "zh-TW"
-      )}`
+      `姓名: ${opts.name}    學號: ${opts.studentId}    匯出時間: ${new Date().toLocaleString("zh-TW")}`
     );
   doc.moveDown(1);
 
