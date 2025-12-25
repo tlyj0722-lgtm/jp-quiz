@@ -15,7 +15,8 @@ export type Question = {
   cloze?: string;
   clozeZh?: string;
   wordOriginal: string;
-  clozeTokens?: { text: string; isParticle: boolean }[];
+  // ✅ 修正：跟 API 回傳一致
+  clozeTokens?: { t: string; particle?: boolean }[];
 };
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
