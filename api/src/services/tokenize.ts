@@ -1,47 +1,43 @@
 // api/src/services/tokenize.ts
-// 完全不依賴 kuromoji / dict，避免雲端找不到 base.dat.gz 的問題
-// 只做最保守的 token：逐字拆（能給 ParticleText 用；不需要字典）
+// Lightweight tokenizer to split Japanese particles for UI highlighting.
+// No kuromoji / no dict files needed.
 
-export type ClozeToken = {
-  text: string;
-  blank?: boolean;
+export type ParticleToken = {
+  t: string;
+  particle: boolean;
 };
 
-export function tokenizeClozeToTokens(cloze: string): ClozeToken[] {
-  // 你原本的 cloze 可能含有 "（　）" 或 "()" 當作挖空
-  // 我們把括號內容視為 blank（顯示空格）
-  const s = cloze ?? "";
+// Common particles / auxiliary chunks (longer first to avoid partial matches)
+const PARTICLES = [
+  "では", "には", "とは", "へと",
+  "から", "まで", "より", "だけ", "ほど", "くらい",
+  "など", "なんて",
+  "で", "に", "へ", "と", "が", "を", "は", "も", "や", "の", "か",
+];
 
-  const out: ClozeToken[] = [];
-  let i = 0;
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
-  while (i < s.length) {
-    const ch = s[i];
+// Build regex: split by particles while keeping them
+const particleRe = new RegExp(`(${PARTICLES.map(escapeRegExp).join("|")})`, "g");
 
-    // 支援全形（　）
-    if (ch === "（") {
-      const j = s.indexOf("）", i + 1);
-      if (j !== -1) {
-        out.push({ text: "（　）", blank: true });
-        i = j + 1;
-        continue;
-      }
-    }
+export function tokenizeWithParticles(input: string): ParticleToken[] {
+  const text = (input ?? "").toString();
+  if (!text.trim()) return [];
 
-    // 支援半形 ()
-    if (ch === "(") {
-      const j = s.indexOf(")", i + 1);
-      if (j !== -1) {
-        out.push({ text: "( )", blank: true });
-        i = j + 1;
-        continue;
-      }
-    }
+  const parts = text.split(particleRe).filter((x) => x !== "");
+  const tokens: ParticleToken[] = [];
 
-    // 其他字元就逐字 token
-    out.push({ text: ch });
-    i += 1;
+  for (const p of parts) {
+    const isParticle = PARTICLES.includes(p);
+    // keep spaces/newlines as normal tokens too (ParticleText can decide how to render)
+    tokens.push({ t: p, particle: isParticle });
   }
+  return tokens;
+}
 
-  return out;
+// Optional: if other places import tokenize() you can keep a compatible export:
+export function tokenize(input: string): string[] {
+  return tokenizeWithParticles(input).map((x) => x.t);
 }
