@@ -1,6 +1,6 @@
 import type { Question } from '../types/domain.js';
 import { loadQuestionBank } from './questionBank.js';
-import { tokenizeWithParticles } from './tokenize.js';
+import { tokenizeClozeToTokens } from './tokenize.js';
 import { getProgressMap } from './progress.js';
 
 function shuffle<T>(arr: T[]) {
@@ -22,7 +22,7 @@ export async function getNextQuestions(userKey: string, count: number): Promise<
   // add tokens for sentence questions (助詞藍字)
   for (const q of selected) {
     if (q.type === 'sentence' && q.cloze) {
-      q.clozeTokens = await tokenizeWithParticles(q.cloze);
+      q.clozeTokens = await tokenizeClozeToTokens(q.cloze);
     }
   }
 
