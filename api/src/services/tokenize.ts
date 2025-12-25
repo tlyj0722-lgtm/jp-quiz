@@ -1,67 +1,41 @@
-import kuromoji from "kuromoji";
-import path from "path";
-import fs from "fs";
-import { createRequire } from "module";
 import type { TokenSegment } from "../types/domain.js";
 
-const require = createRequire(import.meta.url);
+// 常見助詞清單（可再擴充）
+const PARTICLES = [
+  "は","が","を","に","へ","で","と","や","の","も","か","ね","よ","な","ぞ","さ",
+  "から","まで","より","ほど","だけ","しか","ばかり","くらい","ぐらい",
+  "でも","では","には","へは","とは","では","でも","なら","ので","のに",
+  "て","で","たり","たり","ながら","つつ",
+  "から","けれど","けど","が","ので","のに",
+];
 
-let tokenizerPromise: Promise<any> | null = null;
+// 依長度排序，避免「では」先被拆成「で」「は」
+const PARTICLES_SORTED = [...new Set(PARTICLES)].sort((a, b) => b.length - a.length);
 
-function pickDictPath(): string {
-  // 1) 最穩：直接用 cwd 找 node_modules（Render/本機都通）
-  const cwdCandidate = path.join(process.cwd(), "node_modules", "kuromoji", "dict");
+// 建立一個 regex，把助詞當成「分隔符」保留在結果中
+const particleRe = new RegExp(`(${PARTICLES_SORTED.map(escapeRegExp).join("|")})`, "g");
 
-  // 2) 解析 kuromoji entry，再推回 package root 的 dict
-  const entry = require.resolve("kuromoji"); // 常見：.../node_modules/kuromoji/src/kuromoji.js
-  const entryDir = path.dirname(entry);
-
-  // dict 可能在：
-  // - .../kuromoji/dict  （entry 在 src）
-  // - .../kuromoji/src/dict（少數情況）
-  const resolvedCandidate1 = path.resolve(entryDir, "..", "dict");
-  const resolvedCandidate2 = path.resolve(entryDir, "dict");
-
-  const candidates = [cwdCandidate, resolvedCandidate1, resolvedCandidate2];
-
-  for (const p of candidates) {
-    const base = path.join(p, "base.dat.gz");
-    if (fs.existsSync(base)) return p;
-  }
-
-  // 找不到就把候選路徑吐出來，方便你直接看 Render 在哪個路徑下跑
-  throw new Error(
-    `kuromoji dict not found. Tried:\n` +
-      candidates.map((p) => `- ${p}`).join("\n") +
-      `\n(cwd=${process.cwd()}, entry=${entry})`
-  );
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function getTokenizer() {
-  if (!tokenizerPromise) {
-    tokenizerPromise = new Promise((resolve, reject) => {
-      try {
-        const dictPath = pickDictPath();
-        kuromoji.builder({ dictPath }).build((err: any, tokenizer: any) => {
-          if (err) return reject(err);
-          resolve(tokenizer);
-        });
-      } catch (e) {
-        reject(e);
-      }
-    });
-  }
-  return tokenizerPromise;
-}
-
+/**
+ * 將文字切成片段，並標註哪些片段是助詞
+ * - 不依賴 kuromoji 字典
+ * - 雲端部署不會再出現 dict/base.dat.gz
+ */
 export async function tokenizeWithParticles(text: string): Promise<TokenSegment[]> {
-  const tok = await getTokenizer();
-  const tokens = tok.tokenize(text);
+  if (!text) return [];
 
-  return tokens
-    .map((x: any) => ({
-      text: x.surface_form,
-      isParticle: x.pos === "助詞",
-    }))
-    .filter((seg: any) => seg.text && seg.text.length > 0);
+  // 先用 regex 切分：助詞會被保留成獨立 token
+  const raw = text.split(particleRe);
+
+  // raw 會包含一般文字與助詞交錯
+  const out: TokenSegment[] = [];
+  for (const part of raw) {
+    if (!part) continue;
+    const isParticle = PARTICLES_SORTED.includes(part);
+    out.push({ text: part, isParticle });
+  }
+  return out;
 }
