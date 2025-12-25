@@ -1,65 +1,47 @@
-import type { TokenSegment } from '../types/domain.js';
+// api/src/services/tokenize.ts
+// 完全不依賴 kuromoji / dict，避免雲端找不到 base.dat.gz 的問題
+// 只做最保守的 token：逐字拆（能給 ParticleText 用；不需要字典）
 
-// 簡單助詞表：越長越先比對（避免「から」被拆成「か」）
-const PARTICLES = [
-  'から', 'まで', 'より',
-  'しか', 'だけ', 'でも', 'こそ', 'さえ', 'ほど', 'ばかり',
-  'ので', 'のに',
-  'は', 'が', 'を', 'に', 'へ', 'で', 'と', 'や', 'も', 'か', 'の', 
-];
+export type ClozeToken = {
+  text: string;
+  blank?: boolean;
+};
 
-function isHiragana(ch: string) {
-  const code = ch.charCodeAt(0);
-  return code >= 0x3040 && code <= 0x309F;
-}
+export function tokenizeClozeToTokens(cloze: string): ClozeToken[] {
+  // 你原本的 cloze 可能含有 "（　）" 或 "()" 當作挖空
+  // 我們把括號內容視為 blank（顯示空格）
+  const s = cloze ?? "";
 
-// 很保守的邊界判斷：
-// - 前一字如果是日文(平假名/漢字/片假名)，也可能會誤判，但至少不需要字典檔。
-// 你如果想更精準，我之後可以再加更強規則。
-function canMarkAsParticle(text: string, start: number, len: number) {
-  const prev = start > 0 ? text[start - 1] : '';
-  const next = start + len < text.length ? text[start + len] : '';
-  // 避免把「なん」這種詞的一部分亂標：如果前後都是平假名，通常是詞內部，就不標
-  if (prev && next && isHiragana(prev) && isHiragana(next)) return false;
-  return true;
-}
-
-export async function tokenizeWithParticles(text: string): Promise<TokenSegment[]> {
-  const segments: TokenSegment[] = [];
+  const out: ClozeToken[] = [];
   let i = 0;
 
-  while (i < text.length) {
-    let matched: string | null = null;
+  while (i < s.length) {
+    const ch = s[i];
 
-    for (const p of PARTICLES) {
-      if (text.startsWith(p, i) && canMarkAsParticle(text, i, p.length)) {
-        matched = p;
-        break;
+    // 支援全形（　）
+    if (ch === "（") {
+      const j = s.indexOf("）", i + 1);
+      if (j !== -1) {
+        out.push({ text: "（　）", blank: true });
+        i = j + 1;
+        continue;
       }
     }
 
-    if (matched) {
-      segments.push({ text: matched, isParticle: true });
-      i += matched.length;
-    } else {
-      // 收集一段非助詞文字，減少 segments 數量
-      let j = i + 1;
-      while (j < text.length) {
-        let hit = false;
-        for (const p of PARTICLES) {
-          if (text.startsWith(p, j) && canMarkAsParticle(text, j, p.length)) {
-            hit = true;
-            break;
-          }
-        }
-        if (hit) break;
-        j++;
+    // 支援半形 ()
+    if (ch === "(") {
+      const j = s.indexOf(")", i + 1);
+      if (j !== -1) {
+        out.push({ text: "( )", blank: true });
+        i = j + 1;
+        continue;
       }
-      segments.push({ text: text.slice(i, j), isParticle: false });
-      i = j;
     }
+
+    // 其他字元就逐字 token
+    out.push({ text: ch });
+    i += 1;
   }
 
-  // 去掉空段
-  return segments.filter(s => s.text.length > 0);
+  return out;
 }
