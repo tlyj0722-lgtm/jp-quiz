@@ -12,6 +12,32 @@ function shuffle<T>(arr: T[]) {
   return a;
 }
 
+/**
+ * Adapt tokens returned by tokenizeClozeToTokens (ClozeToken[])
+ * into the type expected by Question.clozeTokens (TokenSegment[]).
+ * We keep it flexible because the exact field names may differ between implementations.
+ */
+function toTokenSegments(tokens: unknown): any[] {
+  const arr = Array.isArray(tokens) ? tokens : [];
+  return arr.map((x: any) => {
+    const t = (x?.t ?? x?.text ?? '').toString();
+    const particle = Boolean(x?.particle ?? x?.isParticle ?? false);
+    const blank = Boolean(x?.blank ?? x?.isBlank ?? false);
+
+    // TokenSegment 通常至少需要文字欄位；其餘欄位有就帶上
+    const seg: any = { t };
+    if (particle) seg.particle = true;
+    if (blank) seg.blank = true;
+
+    // 如果你的 TokenSegment 用的是 text / isParticle / isBlank 這套命名，也一併帶上（更穩）
+    if ('text' in (x || {})) seg.text = t;
+    if ('isParticle' in (x || {})) seg.isParticle = particle;
+    if ('isBlank' in (x || {})) seg.isBlank = blank;
+
+    return seg;
+  });
+}
+
 export async function getNextQuestions(userKey: string, count: number): Promise<Question[]> {
   const bank = await loadQuestionBank();
   const progressMap = await getProgressMap(userKey);
@@ -22,7 +48,9 @@ export async function getNextQuestions(userKey: string, count: number): Promise<
   // add tokens for sentence questions (助詞藍字)
   for (const q of selected) {
     if (q.type === 'sentence' && q.cloze) {
-      q.clozeTokens = await tokenizeClozeToTokens(q.cloze);
+      const clozeTokens = await tokenizeClozeToTokens(q.cloze);
+      // ✅ Convert ClozeToken[] -> TokenSegment[]
+      q.clozeTokens = toTokenSegments(clozeTokens) as any;
     }
   }
 
