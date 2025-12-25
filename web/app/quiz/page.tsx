@@ -8,9 +8,9 @@ import { ParticleText } from "@/components/ParticleText";
 
 type Result = {
   isCorrect: boolean;
-  correctKana: string;
-  correctZh: string;
-  wordOriginal: string;
+  correctKana: string; // A
+  correctZh: string;   // B
+  wordOriginal: string; // E
 };
 
 const POINTS_PER_Q = 4;
@@ -145,19 +145,22 @@ export default function QuizPage() {
           </div>
 
           <div className="mt-4 space-y-3">
+            {/* ✅ 題目顯示規則：
+                - sentence：顯示 C（cloze / clozeTokens）並顯示 D（clozeZh）
+                - vocab：顯示 B（answerZh）
+            */}
             {q.type === "sentence" ? (
               <div className="space-y-2">
-                {q.clozeTokens ? (
+                {Array.isArray(q.clozeTokens) && q.clozeTokens.length > 0 ? (
                   <ParticleText tokens={q.clozeTokens} />
                 ) : (
                   <div className="text-lg leading-relaxed">{q.cloze}</div>
                 )}
-                {q.clozeZh && <div className="text-sm text-zinc-600">{q.clozeZh}</div>}
+                {q.clozeZh ? <div className="text-sm text-zinc-600">{q.clozeZh}</div> : null}
               </div>
             ) : (
               <div className="space-y-1">
-                <div className="text-sm text-zinc-600">請輸入平假名答案：</div>
-                <div className="text-lg">{q.answerZh}</div>
+                <div className="text-lg leading-relaxed">{q.answerZh}</div>
               </div>
             )}
 
@@ -195,21 +198,36 @@ export default function QuizPage() {
               )}
             </div>
 
-            {lastResult && !lastResult.isCorrect && (
-              <div className="rounded-xl bg-red-50 p-3 text-sm text-red-800">
-                <div>❌ 答錯</div>
-                <div className="mt-1">
-                  正確答案（平假名）：<span className="font-semibold">{lastResult.correctKana}</span>
-                </div>
-                <div>中文：{lastResult.correctZh}</div>
-                <div>單字原貌：{lastResult.wordOriginal}</div>
-              </div>
-            )}
+            {/* ✅ 解答顯示規則（送出後）：
+                - sentence：顯示 A + B + E
+                - vocab：顯示 A + E
+            */}
+            {lastResult && (
+              <div
+                className={`rounded-xl p-3 text-sm ${
+                  lastResult.isCorrect ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"
+                }`}
+              >
+                <div>{lastResult.isCorrect ? "✅ 答對" : "❌ 答錯"}</div>
 
-            {lastResult && lastResult.isCorrect && (
-              <div className="rounded-xl bg-green-50 p-3 text-sm text-green-800">
-                ✅ 答對
-                <div className="mt-1 text-green-900">單字原貌：{lastResult.wordOriginal}</div>
+                {q.type === "sentence" ? (
+                  <>
+                    <div className="mt-2">
+                      答案（A / 平假名）：{" "}
+                      <span className="font-semibold">{lastResult.correctKana}</span>
+                    </div>
+                    <div>中文（B）：{lastResult.correctZh}</div>
+                    <div>單字原貌（E）：{lastResult.wordOriginal}</div>
+                  </>
+                ) : (
+                  <>
+                    <div className="mt-2">
+                      答案（A / 平假名）：{" "}
+                      <span className="font-semibold">{lastResult.correctKana}</span>
+                    </div>
+                    <div>單字原貌（E）：{lastResult.wordOriginal}</div>
+                  </>
+                )}
               </div>
             )}
           </div>
