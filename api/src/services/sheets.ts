@@ -58,8 +58,16 @@ export async function listSheetTitles() {
 
 export async function getQuestionSheetTitle(): Promise<string> {
   if (QUESTION_SHEET_NAME) return QUESTION_SHEET_NAME;
+
+  // 如果沒指定題庫 tab，就自動選「不是系統 tab」的第一個
   const titles = await listSheetTitles();
   if (titles.length === 0) throw new Error('No sheets found in spreadsheet');
+
+  const system = new Set(Object.values(SHEETS)); // Users / Progress / WrongBank / Resets
+  const candidate = titles.find((t) => !system.has(t));
+  if (candidate) return candidate;
+
+  // 如果整份表只剩系統 tab，那就退回第一個（但這表示你根本沒有題庫 tab）
   return titles[0];
 }
 
