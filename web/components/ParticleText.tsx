@@ -1,11 +1,16 @@
 import React from 'react';
 
-export function ParticleText({ tokens }: { tokens: { text: string; isParticle: boolean }[] }) {
+type Token = { t: string; particle?: boolean };
+
+export function ParticleText({ tokens }: { tokens: Token[] }) {
   return (
     <span className="text-lg leading-relaxed">
-      {tokens.map((t, i) => (
-        <span key={i} className={t.isParticle ? 'text-blue-600' : ''}>
-          {t.text}
+      {tokens.map((x, i) => (
+        <span
+          key={i}
+          className={x.particle ? "text-blue-600 font-semibold" : ""}
+        >
+          {x.t}
         </span>
       ))}
     </span>
