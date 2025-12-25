@@ -19,7 +19,7 @@ export async function tokenizeWithParticles(text: string): Promise<TokenSegment[
   const tok = await getTokenizer();
   const tokens = tok.tokenize(text);
   return tokens.map((x: any) => ({
-    text: x.surface_form,
-    isParticle: x.pos === '助詞'
- })).filter((seg: any) => seg.text.length > 0);
+  text: x.surface_form,
+  isParticle: x.pos === '助詞',
+})).filter((seg: any) => seg.text.length > 0);
 }
