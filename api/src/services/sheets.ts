@@ -1,186 +1,74 @@
+// api/src/services/sheets.ts
 import { google } from 'googleapis';
 
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID || '1dIa6Js-ggyEBXXbh8xzc5It2UsganBaI5X8SZve-2hE';
+const SHEET_ID = process.env.GOOGLE_SHEET_ID!;
+const QUESTION_SHEET_NAME = process.env.QUESTION_SHEET_NAME || 'Questions';
 
-const QUESTION_SHEET_NAME = process.env.QUESTION_SHEET_NAME; // optional; if empty, uses first sheet.
+// ====== 系統用 Sheet（嚴格型別） ======
+type SystemSheetName =
+  | 'Users'
+  | 'Progress'
+  | 'WrongBank'
+  | 'Resets';
 
-export const SHEETS = {
-  USERS: 'Users',
-  PROGRESS: 'Progress',
-  WRONG: 'WrongBank',
-  RESETS: 'Resets'
-} as const;
+// ====== Google Sheets client ======
+const auth = new google.auth.GoogleAuth({
+  credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!),
+  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+});
 
-let cachedSheetNames: string[] | null = null;
-let cacheExpiresAt = 0;
+const sheets = google.sheets({
+  version: 'v4',
+  auth,
+});
 
-function getServiceAccount() {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  if (!raw) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON not set');
-  try {
-    return JSON.parse(raw) as {
-      client_email: string;
-      private_key: string;
-    };
-  } catch (e) {
-    throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON');
-  }
-}
-
-export function getSheetsClient() {
-  const sa = getServiceAccount();
-  const auth = new google.auth.JWT({
-    email: sa.client_email,
-    key: sa.private_key,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets']
-  });
-  return google.sheets({ version: 'v4', auth });
-}
-
-export function getSpreadsheetId() {
-  return SPREADSHEET_ID;
-}
-
-export async function listSheetTitles() {
-  const now = Date.now();
-  if (cachedSheetNames && now < cacheExpiresAt) return cachedSheetNames;
-
-  const sheets = getSheetsClient();
-  const res = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
-  const titles = (res.data.sheets || [])
-    .map((s) => s.properties?.title)
-    .filter((t): t is string => Boolean(t));
-
-  cachedSheetNames = titles;
-  cacheExpiresAt = now + 5 * 60 * 1000;
-  return titles;
-}
-
-export async function getQuestionSheetTitle(): Promise<string> {
-  if (QUESTION_SHEET_NAME) return QUESTION_SHEET_NAME;
-
-  // 如果沒指定題庫 tab，就自動選「不是系統 tab」的第一個
-  const titles = await listSheetTitles();
-  if (titles.length === 0) throw new Error('No sheets found in spreadsheet');
-
-  const system = new Set(Object.values(SHEETS)); // Users / Progress / WrongBank / Resets
-  const candidate = titles.find((t) => !system.has(t));
-  if (candidate) return candidate;
-
-  // 如果整份表只剩系統 tab，那就退回第一個（但這表示你根本沒有題庫 tab）
-  return titles[0];
-}
-
-export async function ensureDataSheetsExist() {
-  const sheets = getSheetsClient();
-  const titles = await listSheetTitles();
-  const toCreate = Object.values(SHEETS).filter((name) => !titles.includes(name));
-  if (toCreate.length === 0) return;
-
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
-    requestBody: {
-      requests: toCreate.map((title) => ({
-        addSheet: { properties: { title } }
-      }))
-    }
-  });
-
-  // Add headers
-  const headerUpdates = [] as { range: string; values: string[][] }[];
-  if (toCreate.includes(SHEETS.USERS)) {
-    headerUpdates.push({
-      range: `${SHEETS.USERS}!A1:D1`,
-      values: [[
-        'userKey',
-        'name',
-        'studentId',
-        'createdAt'
-      ]]
-    });
-  }
-  if (toCreate.includes(SHEETS.PROGRESS)) {
-    headerUpdates.push({
-      range: `${SHEETS.PROGRESS}!A1:F1`,
-      values: [[
-        'userKey',
-        'qid',
-        'status',
-        'attempts',
-        'lastAnswer',
-        'updatedAt'
-      ]]
-    });
-  }
-  if (toCreate.includes(SHEETS.WRONG)) {
-    headerUpdates.push({
-      range: `${SHEETS.WRONG}!A1:F1`,
-      values: [[
-        'userKey',
-        'qid',
-        'lastWrongAnswer',
-        'resolved',
-        'addedAt',
-        'resolvedAt'
-      ]]
-    });
-  }
-
-  if (toCreate.includes(SHEETS.RESETS)) {
-    headerUpdates.push({
-      range: `${SHEETS.RESETS}!A1:B1`,
-      values: [[
-        'userKey',
-        'resetAt'
-      ]]
-    });
-  }
-
-  for (const u of headerUpdates) {
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: u.range,
-      valueInputOption: 'RAW',
-      requestBody: { values: u.values }
-    });
-  }
-
-  // refresh cache
-  cachedSheetNames = null;
-}
-
-export async function readRange(range: string) {
-  const sheets = getSheetsClient();
-  const res = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range });
-  return (res.data.values || []) as string[][];
-}
-
-export async function appendRow(sheetName: string, values: (string | number | boolean)[]) {
-  const sheets = getSheetsClient();
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A1`,
-    valueInputOption: 'RAW',
-    insertDataOption: 'INSERT_ROWS',
-    requestBody: { values: [values.map(String)] }
+// ====== 取得「系統用 sheet」 ======
+async function getSystemSheet(sheetName: SystemSheetName) {
+  return sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET_ID,
+    range: sheetName,
   });
 }
 
-export async function updateRow(sheetName: string, rowNumber1Based: number, values: (string | number | boolean)[]) {
-  const sheets = getSheetsClient();
-  const range = `${sheetName}!A${rowNumber1Based}:Z${rowNumber1Based}`;
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range,
-    valueInputOption: 'RAW',
-    requestBody: { values: [values.map(String)] }
+// ====== 取得「題庫 sheet」（重點！string，不受 union 限制） ======
+async function getQuestionSheet() {
+  return sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET_ID,
+    range: QUESTION_SHEET_NAME,
   });
 }
 
-export async function clearSheetExceptHeader(sheetName: string) {
-  const sheets = getSheetsClient();
-  await sheets.spreadsheets.values.clear({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A2:Z`
-  });
+// ===============================
+// 🔽 以下是實際對外使用的 function
+// ===============================
+
+// 👉 題庫：只從 Google Sheet 讀
+export async function loadQuestionsFromSheet() {
+  const res = await getQuestionSheet();
+  const rows = res.data.values || [];
+
+  // TODO: 這裡保持你原本的 parse 邏輯
+  // 第一欄：答案
+  // 第二欄：中文
+  // 第三欄：挖空句
+  // 第四欄：句子翻譯
+  // 第五欄：單字原貌
+  return rows;
+}
+
+// 👉 系統資料（用戶、進度、錯題）
+export async function loadUsers() {
+  return getSystemSheet('Users');
+}
+
+export async function loadProgress() {
+  return getSystemSheet('Progress');
+}
+
+export async function loadWrongBank() {
+  return getSystemSheet('WrongBank');
+}
+
+export async function loadResets() {
+  return getSystemSheet('Resets');
 }
