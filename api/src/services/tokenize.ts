@@ -1,59 +1,65 @@
-import kuromoji from 'kuromoji';
-import path from 'node:path';
-import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import type { TokenSegment } from '../types/domain.js';
 
-let tokenizerPromise: Promise<kuromoji.Tokenizer<kuromoji.IpadicFeatures>> | null = null;
+// 簡單助詞表：越長越先比對（避免「から」被拆成「か」）
+const PARTICLES = [
+  'から', 'まで', 'より',
+  'しか', 'だけ', 'でも', 'こそ', 'さえ', 'ほど', 'ばかり',
+  'ので', 'のに',
+  'は', 'が', 'を', 'に', 'へ', 'で', 'と', 'や', 'も', 'か', 'の', 
+];
 
-function getTokenizer() {
-  if (!tokenizerPromise) {
-    tokenizerPromise = new Promise((resolve, reject) => {
-      // Render / Node runtime 的 cwd 可能不固定，所以這裡用多個候選路徑去找
-      const here = path.dirname(fileURLToPath(import.meta.url));
-      const candidates = [
-        // 常見：啟動位置就是 api/，node_modules 在同層
-        path.resolve(process.cwd(), 'node_modules/kuromoji/dict'),
-        // 常見：啟動位置在 api/dist
-        path.resolve(process.cwd(), '..', 'node_modules/kuromoji/dict'),
-        // 常見：啟動位置在 api/src
-        path.resolve(process.cwd(), '..', '..', 'node_modules/kuromoji/dict'),
-        // 以目前檔案位置 (src/services) 反推專案根
-        path.resolve(here, '..', '..', '..', 'node_modules/kuromoji/dict'),
-        // 有些部署會把 node_modules 放在 dist 的附近
-        path.resolve(here, '..', '..', 'node_modules/kuromoji/dict'),
-      ];
+function isHiragana(ch: string) {
+  const code = ch.charCodeAt(0);
+  return code >= 0x3040 && code <= 0x309F;
+}
 
-      const dictPath = candidates.find((p) => fs.existsSync(path.join(p, 'base.dat.gz')));
-      if (!dictPath) {
-        return reject(
-          new Error(`kuromoji dict not found. Tried:\n${candidates.join('\n')}`)
-        );
-      }
-
-      kuromoji.builder({ dictPath }).build((err, t) => {
-        if (err || !t) return reject(err);
-        resolve(t);
-      });
-    });
-  }
-  return tokenizerPromise;
+// 很保守的邊界判斷：
+// - 前一字如果是日文(平假名/漢字/片假名)，也可能會誤判，但至少不需要字典檔。
+// 你如果想更精準，我之後可以再加更強規則。
+function canMarkAsParticle(text: string, start: number, len: number) {
+  const prev = start > 0 ? text[start - 1] : '';
+  const next = start + len < text.length ? text[start + len] : '';
+  // 避免把「なん」這種詞的一部分亂標：如果前後都是平假名，通常是詞內部，就不標
+  if (prev && next && isHiragana(prev) && isHiragana(next)) return false;
+  return true;
 }
 
 export async function tokenizeWithParticles(text: string): Promise<TokenSegment[]> {
-  try {
-    const tok = await getTokenizer();
-    const tokens = tok.tokenize(text);
+  const segments: TokenSegment[] = [];
+  let i = 0;
 
-    return tokens
-      .map((x) => ({
-        text: x.surface_form,
-        isParticle: x.pos === '助詞',
-      }))
-      .filter((seg) => seg.text.length > 0);
-  } catch {
-    // ⚠️ 找不到 dict 時不要讓整個 API 爆掉：
-    // 就直接回傳一段（助詞不藍也沒關係，至少測驗可用）
-    return [{ text, isParticle: false }];
+  while (i < text.length) {
+    let matched: string | null = null;
+
+    for (const p of PARTICLES) {
+      if (text.startsWith(p, i) && canMarkAsParticle(text, i, p.length)) {
+        matched = p;
+        break;
+      }
+    }
+
+    if (matched) {
+      segments.push({ text: matched, isParticle: true });
+      i += matched.length;
+    } else {
+      // 收集一段非助詞文字，減少 segments 數量
+      let j = i + 1;
+      while (j < text.length) {
+        let hit = false;
+        for (const p of PARTICLES) {
+          if (text.startsWith(p, j) && canMarkAsParticle(text, j, p.length)) {
+            hit = true;
+            break;
+          }
+        }
+        if (hit) break;
+        j++;
+      }
+      segments.push({ text: text.slice(i, j), isParticle: false });
+      i = j;
+    }
   }
+
+  // 去掉空段
+  return segments.filter(s => s.text.length > 0);
 }
