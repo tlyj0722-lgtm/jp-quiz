@@ -1,37 +1,59 @@
-import type { TokenSegment } from "../types/domain.js";
+import kuromoji from 'kuromoji';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import type { TokenSegment } from '../types/domain.js';
 
-// 常見助詞清單（可再擴充）
-const PARTICLES = [
-  "は","が","を","に","へ","で","と","や","の","も","か","から","まで","でも","ので","のに"
-];
+let tokenizerPromise: Promise<kuromoji.Tokenizer<kuromoji.IpadicFeatures>> | null = null;
 
-// 依長度排序，避免「では」先被拆成「で」「は」
-const PARTICLES_SORTED = [...new Set(PARTICLES)].sort((a, b) => b.length - a.length);
+function getTokenizer() {
+  if (!tokenizerPromise) {
+    tokenizerPromise = new Promise((resolve, reject) => {
+      // Render / Node runtime 的 cwd 可能不固定，所以這裡用多個候選路徑去找
+      const here = path.dirname(fileURLToPath(import.meta.url));
+      const candidates = [
+        // 常見：啟動位置就是 api/，node_modules 在同層
+        path.resolve(process.cwd(), 'node_modules/kuromoji/dict'),
+        // 常見：啟動位置在 api/dist
+        path.resolve(process.cwd(), '..', 'node_modules/kuromoji/dict'),
+        // 常見：啟動位置在 api/src
+        path.resolve(process.cwd(), '..', '..', 'node_modules/kuromoji/dict'),
+        // 以目前檔案位置 (src/services) 反推專案根
+        path.resolve(here, '..', '..', '..', 'node_modules/kuromoji/dict'),
+        // 有些部署會把 node_modules 放在 dist 的附近
+        path.resolve(here, '..', '..', 'node_modules/kuromoji/dict'),
+      ];
 
-// 建立一個 regex，把助詞當成「分隔符」保留在結果中
-const particleRe = new RegExp(`(${PARTICLES_SORTED.map(escapeRegExp).join("|")})`, "g");
+      const dictPath = candidates.find((p) => fs.existsSync(path.join(p, 'base.dat.gz')));
+      if (!dictPath) {
+        return reject(
+          new Error(`kuromoji dict not found. Tried:\n${candidates.join('\n')}`)
+        );
+      }
 
-function escapeRegExp(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      kuromoji.builder({ dictPath }).build((err, t) => {
+        if (err || !t) return reject(err);
+        resolve(t);
+      });
+    });
+  }
+  return tokenizerPromise;
 }
 
-/**
- * 將文字切成片段，並標註哪些片段是助詞
- * - 不依賴 kuromoji 字典
- * - 雲端部署不會再出現 dict/base.dat.gz
- */
 export async function tokenizeWithParticles(text: string): Promise<TokenSegment[]> {
-  if (!text) return [];
+  try {
+    const tok = await getTokenizer();
+    const tokens = tok.tokenize(text);
 
-  // 先用 regex 切分：助詞會被保留成獨立 token
-  const raw = text.split(particleRe);
-
-  // raw 會包含一般文字與助詞交錯
-  const out: TokenSegment[] = [];
-  for (const part of raw) {
-    if (!part) continue;
-    const isParticle = PARTICLES_SORTED.includes(part);
-    out.push({ text: part, isParticle });
+    return tokens
+      .map((x) => ({
+        text: x.surface_form,
+        isParticle: x.pos === '助詞',
+      }))
+      .filter((seg) => seg.text.length > 0);
+  } catch {
+    // ⚠️ 找不到 dict 時不要讓整個 API 爆掉：
+    // 就直接回傳一段（助詞不藍也沒關係，至少測驗可用）
+    return [{ text, isParticle: false }];
   }
-  return out;
 }
