@@ -11,6 +11,8 @@ type Result = {
   correctKana: string;
   correctZh: string;
   wordOriginal: string;
+  // 如果你 API 有額外回傳第五欄或其他欄位，可以在這裡加：
+  // extra?: string;
 };
 
 const POINTS_PER_Q = 4;
@@ -18,13 +20,15 @@ const QUIZ_SIZE = 25;
 
 export default function QuizPage() {
   const router = useRouter();
-  const profile = useMemo(() => getProfile(), []);
 
+  const [profileText, setProfileText] = useState('');
   const [loading, setLoading] = useState(true);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [idx, setIdx] = useState(0);
+
   const [answer, setAnswer] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
   const [flash, setFlash] = useState<'green' | 'red' | null>(null);
   const [lastResult, setLastResult] = useState<Result | null>(null);
   const [correctCount, setCorrectCount] = useState(0);
@@ -56,14 +60,16 @@ export default function QuizPage() {
       router.replace('/login');
       return;
     }
+    const p = getProfile();
+    setProfileText(p ? `${p.name}（${p.studentId}）` : '');
+
     void loadQuiz();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function submit() {
     if (!q) return;
-    if (lastResult) return; // 已顯示結果時，不允許重複送出
-
+    if (lastResult) return; // 已經顯示解答時，不要再送出
     setSubmitting(true);
     setError(null);
     try {
@@ -71,9 +77,8 @@ export default function QuizPage() {
       setLastResult(r);
 
       if (r.isCorrect) setCorrectCount((c) => c + 1);
-
-      // 背景提示（保留，不自動跳題）
       setFlash(r.isCorrect ? 'green' : 'red');
+      setTimeout(() => setFlash(null), 500);
     } catch (e: any) {
       setError(e?.message || '送出失敗');
     } finally {
@@ -82,7 +87,7 @@ export default function QuizPage() {
   }
 
   function next() {
-    // 手動下一題：清掉答案與結果
+    // 手動下一題：清掉解答與輸入，進下一題
     setIdx((i) => i + 1);
     setAnswer('');
     setLastResult(null);
@@ -96,20 +101,14 @@ export default function QuizPage() {
 
   const score = correctCount * POINTS_PER_Q;
   const maxScore = questions.length * POINTS_PER_Q;
+  const bgClass = flash === 'green' ? 'bg-green-100' : flash === 'red' ? 'bg-red-100' : 'bg-white';
 
-  const bgClass =
-    flash === 'green' ? 'bg-green-100' :
-    flash === 'red' ? 'bg-red-100' :
-    'bg-white';
-
-  const inputDisabled = submitting || Boolean(lastResult);
+  const inputDisabled = submitting || !!lastResult;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div className="text-sm text-zinc-600">
-          {profile ? `${profile.name}（${profile.studentId}）` : ''}
-        </div>
+        <div className="text-sm text-zinc-600">{profileText}</div>
         <div className="flex gap-2">
           <a className="rounded-xl border bg-white px-3 py-1.5 text-sm" href="/dashboard">個人介面</a>
           <button className="rounded-xl border bg-white px-3 py-1.5 text-sm" onClick={logout}>登出</button>
@@ -164,33 +163,32 @@ export default function QuizPage() {
                 value={answer}
                 onChange={(e) => setAnswer(e.target.value)}
                 placeholder="輸入平假名"
-                disabled={inputDisabled}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    if (!submitting && !lastResult) void submit();
+                    if (!inputDisabled) void submit();
                   }
                 }}
                 autoFocus
+                disabled={inputDisabled}
               />
 
-              <div className="mt-3 flex gap-2">
+              {!lastResult ? (
                 <button
-                  disabled={submitting || Boolean(lastResult)}
+                  disabled={submitting}
                   onClick={() => void submit()}
-                  className="flex-1 rounded-xl bg-zinc-900 px-4 py-2.5 text-white disabled:opacity-50"
+                  className="mt-3 w-full rounded-xl bg-zinc-900 px-4 py-2.5 text-white disabled:opacity-50"
                 >
                   {submitting ? '送出中…' : '送出'}
                 </button>
-
+              ) : (
                 <button
-                  disabled={!lastResult}
                   onClick={next}
-                  className="flex-1 rounded-xl border bg-white px-4 py-2.5 disabled:opacity-50"
+                  className="mt-3 w-full rounded-xl bg-zinc-900 px-4 py-2.5 text-white"
                 >
                   下一題
                 </button>
-              </div>
+              )}
             </div>
 
             {lastResult && !lastResult.isCorrect && (
@@ -198,14 +196,14 @@ export default function QuizPage() {
                 <div>❌ 答錯</div>
                 <div className="mt-1">正確答案（平假名）：<span className="font-semibold">{lastResult.correctKana}</span></div>
                 <div>中文：{lastResult.correctZh}</div>
-                <div>（第五欄）單字原貌：{lastResult.wordOriginal}</div>
+                <div>第五欄/單字原貌：{lastResult.wordOriginal}</div>
               </div>
             )}
 
             {lastResult && lastResult.isCorrect && (
               <div className="rounded-xl bg-green-50 p-3 text-sm text-green-800">
                 ✅ 答對
-                <div className="mt-1 text-green-900">（第五欄）單字原貌：{lastResult.wordOriginal}</div>
+                <div className="mt-1 text-green-900">第五欄/單字原貌：{lastResult.wordOriginal}</div>
               </div>
             )}
           </div>
