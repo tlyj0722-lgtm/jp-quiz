@@ -1,6 +1,9 @@
 import kuromoji from "kuromoji";
 import path from "path";
+import { createRequire } from "module";
 import type { TokenSegment } from "../types/domain.js";
+
+const require = createRequire(import.meta.url);
 
 let tokenizerPromise: Promise<any> | null = null;
 
@@ -8,9 +11,10 @@ function getTokenizer() {
   if (!tokenizerPromise) {
     tokenizerPromise = new Promise((resolve, reject) => {
       try {
-        // ✅ 正確取得 kuromoji 安裝位置（Render / 雲端必備）
-        const kuromojiPath = path.dirname(require.resolve("kuromoji"));
-        const dictPath = path.join(kuromojiPath, "dict");
+        // ✅ ESM 環境不能直接用 require，但可以用 createRequire
+        const kuromojiEntry = require.resolve("kuromoji");
+        const kuromojiDir = path.dirname(kuromojiEntry);
+        const dictPath = path.join(kuromojiDir, "dict");
 
         kuromoji
           .builder({ dictPath })
