@@ -32,12 +32,15 @@ export async function loadQuestionBank(): Promise<Question[]> {
     const hasSentence = Boolean(cClozeRaw || dClozeZhRaw);
 
     // ✅ 分隔列：整列都空白 → 切斷沿用，避免後面殘留例句被綁到前一題
-    if (!hasABCOrE && !hasSentence) {
-      curKana = '';
-      curZh = '';
-      curWord = '';
-      continue;
-    }
+    const hasABCOrE = Boolean(aKanaRaw || bZhRaw || eWordRaw);
+const hasSentence = Boolean(cClozeRaw || dClozeZhRaw);
+
+if (!hasABCOrE && !hasSentence) {
+  curKana = '';
+  curZh = '';
+  curWord = '';
+  continue;
+}
 
     // ✅ 若這列有 A/B/E，更新「目前單字主檔」
     // （允許只改其中一格，但至少要讓三者最後都齊）
